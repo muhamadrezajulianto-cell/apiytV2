@@ -31,6 +31,7 @@ def format_response(status="success", data=None, **kwargs):
     response.update(kwargs)
     return response
 
+@app.get("/")
 @app.get("/api")
 def root_api():
     return format_response(
