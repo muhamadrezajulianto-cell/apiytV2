@@ -87,29 +87,49 @@ def play_audio(video_id: str):
         url=f"https://music.youtube.com/watch?v={video_id}"
     )
 
-@app.get("/api/download/{video_id}")
-def download_audio(video_id: str):
+@app.get("/api/suggest")
+def get_suggestions(q: str):
+    try:
+        suggestions = ytmusic.get_search_suggestions(q)
+        return format_response(data=suggestions)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/artist")
+def get_artist(id: str):
+    try:
+        artist_data = ytmusic.get_artist(id)
+        return format_response(data=artist_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/ytplay")
+def ytplay(url: str = None, video_id: str = None):
     import requests
     try:
-        yt_url = f"https://www.youtube.com/watch?v={video_id}"
+        # Menghandle parameter url atau video_id
+        if url:
+            yt_url = url
+        elif video_id:
+            yt_url = f"https://www.youtube.com/watch?v={video_id}"
+        else:
+            raise HTTPException(status_code=400, detail="Harap sediakan parameter url atau video_id")
+            
         api_url = f"https://star-cloud.web.id/api/ytplay?url={yt_url}"
         
         response = requests.get(api_url)
         data = response.json()
         
         if data.get("status") and "result" in data and "download" in data["result"]:
-            mp3_url = data["result"]["download"]["audio"]
             return format_response(
-                message="Sukses mengambil MP3 dari star-cloud",
-                mp3_url=mp3_url
+                message="Sukses mengambil data media",
+                result=data["result"]
             )
         else:
-            return format_response(status="error", message="Format respons star-cloud tidak sesuai ekspektasi.")
+            return format_response(status="error", message="Format respons tidak sesuai ekspektasi.")
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal menghubungi star-cloud: {str(e)}")
-
-# (Vercel will handle serving the frontend natively from the /public folder based on vercel.json)
+        raise HTTPException(status_code=500, detail=f"Gagal mengambil play data: {str(e)}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8001))
