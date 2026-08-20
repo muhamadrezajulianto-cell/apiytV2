@@ -112,7 +112,7 @@ def ytplay(url: str = None, video_id: str = None):
         if url:
             yt_url = url
         elif video_id:
-            yt_url = f"https://www.youtube.com/watch?v={video_id}"
+            yt_url = f"https://music.youtube.com/watch?v={video_id}"
         else:
             raise HTTPException(status_code=400, detail="Harap sediakan parameter url atau video_id")
             
