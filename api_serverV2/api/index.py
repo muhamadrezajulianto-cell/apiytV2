@@ -92,8 +92,7 @@ def get_artist(id: str = Query(...)):
                 }
             }
         elif id.startswith("VLPL"):
-            playlist_id = id[2:]
-            data = ytmusic.get_playlist(playlist_id)
+            data = ytmusic.get_playlist(id)
             songs = []
             for tr in data.get('tracks', []):
                 thumb = tr.get('thumbnails', [{}])[-1].get('url', '')
@@ -130,8 +129,7 @@ def get_artist(id: str = Query(...)):
                     "result": {
                         "name": data.get('name', 'Unknown Artist'),
                         "cover": data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else '',
-                        "songs": songs,
-                        "topSongs": songs
+                        "songs": songs
                     }
                 }
             except Exception as e:
@@ -271,67 +269,34 @@ async def ytplay(request: Request):
         }
     }
 
-from fastapi import Request
-
 @app.get("/api/stream/{video_id}")
-def stream_audio(video_id: str, request: Request):
-    audio_url = None
-    
-    # Coba pytubefix lebih dulu karena sering lebih ampuh menembus bot-protection Vercel
+def stream_audio(video_id: str):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False
+    }
     try:
-        from pytubefix import YouTube
-        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
-        stream = yt.streams.get_audio_only()
-        if stream:
-            audio_url = stream.url
-    except Exception as e:
-        pass
-
-    # Fallback ke yt-dlp jika pytubefix gagal
-    if not audio_url:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False
-        }
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-                audio_url = info.get('url')
-        except Exception as e:
-            if "Sign in to confirm" in str(e) or "bot" in str(e).lower():
-                pass # Lanjut raise error di bawah
-            else:
-                pass
-                
-    if not audio_url:
-        raise HTTPException(status_code=404, detail="Audio stream not found atau terblokir proteksi YouTube.")
-        
-    try:
-        req_headers = {}
-        range_header = request.headers.get("range")
-        if range_header:
-            req_headers["Range"] = range_header
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            audio_url = info.get('url')
             
-        r = requests.get(audio_url, headers=req_headers, stream=True)
-            
-        def generate_audio():
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    yield chunk
-                    
-        resp_headers = {}
-        for h in ["Content-Range", "Content-Length", "Accept-Ranges", "Content-Type"]:
-            if h in r.headers:
-                resp_headers[h] = r.headers[h]
+            if not audio_url:
+                raise HTTPException(status_code=404, detail="Audio stream not found")
                 
-        return StreamingResponse(
-            generate_audio(), 
-            status_code=r.status_code,
-            headers=resp_headers,
-            media_type=r.headers.get("Content-Type", "audio/mp4")
-        )
+            def generate_audio():
+                with requests.get(audio_url, stream=True) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            yield chunk
+                            
+            return StreamingResponse(
+                generate_audio(), 
+                media_type="audio/mp4",
+                headers={"Accept-Ranges": "bytes"}
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
