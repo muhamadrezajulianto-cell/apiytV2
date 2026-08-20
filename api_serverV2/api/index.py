@@ -139,7 +139,7 @@ def ytplay(url: str = None, video_id: str = None):
             audio_url = info['url']
             
         return format_response(
-            message="Sukses mengambil data media",
+            message="Sukses mengambil data media mandiri",
             result={"download": {"audio": audio_url}}
         )
             
