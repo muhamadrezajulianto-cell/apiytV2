@@ -255,17 +255,30 @@ async def ytplay(request: Request):
         'no_warnings': True,
         'extract_flat': False
     }
+    
     audio_url = ""
+    video_title = "audio"
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             audio_url = info.get('url', '')
+            video_title = info.get('title', 'audio')
     except Exception as e:
         pass
         
     host_url = str(request.base_url).rstrip("/")
-    # Jika gagal mendapat direct URL, fallback ke stream lokal/proxy
-    final_audio = audio_url if audio_url else f"{host_url}/api/stream/{video_id}"
+    
+    import re
+    # Buat slug dari judul video untuk mematuhi format savetube (contoh: "di-akhir-perang")
+    slug = "-".join(re.findall(r'[a-z0-9]+', video_title.lower()))
+    if not slug:
+        slug = "audio"
+        
+    # URL CDN Savetube sesuai format user (berfungsi mem-bypass 403 Google IP Lock)
+    savetube_url = f"https://cdn403.savetube.vip/media/{video_id}/{slug}-128-ytshorts.savetube.me.mp3"
+    
+    # Gunakan savetube_url, jika gagal (di client), client bisa mencoba yt-dlp direct url
+    final_audio = savetube_url
     
     return {
         "status": True,
