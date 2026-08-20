@@ -74,20 +74,21 @@ def get_artist(id: str = Query(...)):
         if id.startswith("MPRE"):
             data = ytmusic.get_album(id)
             songs = []
-            album_thumb = data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else ''
+            album_thumb = data.get('thumbnails', [])
             for tr in data.get('tracks', []):
                 songs.append({
                     "videoId": tr.get('videoId'),
                     "title": tr.get('title'),
                     "artist": ", ".join([a.get('name', '') for a in tr.get('artists', [])]) if tr.get('artists') else 'Unknown',
-                    "cover": album_thumb,
+                    "thumbnails": album_thumb,
                     "url": "https://youtube.com/watch?v=" + str(tr.get('videoId'))
                 })
             return {
                 "status": True, 
                 "result": {
-                    "name": data.get('title', 'Unknown Album'),
-                    "cover": album_thumb,
+                    "id": id,
+                    "title": data.get('title', 'Unknown Album'),
+                    "thumbnails": album_thumb,
                     "songs": songs
                 }
             }
@@ -95,42 +96,34 @@ def get_artist(id: str = Query(...)):
             data = ytmusic.get_playlist(id)
             songs = []
             for tr in data.get('tracks', []):
-                thumb = tr.get('thumbnails', [{}])[-1].get('url', '')
                 songs.append({
                     "videoId": tr.get('videoId'),
                     "title": tr.get('title'),
                     "artist": ", ".join([a.get('name', '') for a in tr.get('artists', [])]) if tr.get('artists') else 'Unknown',
-                    "cover": thumb,
+                    "thumbnails": tr.get('thumbnails', []),
+                    "duration": tr.get('duration', ''),
                     "url": "https://youtube.com/watch?v=" + str(tr.get('videoId'))
                 })
             return {
                 "status": True, 
                 "result": {
-                    "name": data.get('title', 'Unknown Playlist'),
-                    "cover": data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else '',
+                    "id": id,
+                    "title": data.get('title', 'Unknown Playlist'),
+                    "thumbnails": data.get('thumbnails', []),
                     "songs": songs
                 }
             }
         else:
             try:
                 data = ytmusic.get_artist(id)
-                songs = []
-                for tr in data.get('songs', {}).get('results', []):
-                    thumb = tr.get('thumbnails', [{}])[-1].get('url', '')
-                    songs.append({
-                        "videoId": tr.get('videoId'),
-                        "title": tr.get('title'),
-                        "artist": ", ".join([a.get('name', '') for a in tr.get('artists', [])]) if tr.get('artists') else 'Unknown',
-                        "cover": thumb,
-                        "url": "https://youtube.com/watch?v=" + str(tr.get('videoId'))
-                    })
+                # ytmusicapi get_artist returns topSongs, thumbnails, etc.
+                if not data.get('topSongs') and data.get('songs', {}).get('results'):
+                    data['topSongs'] = data['songs']['results']
+                # Make sure artistId is present
+                data['artistId'] = id
                 return {
                     "status": True,
-                    "result": {
-                        "name": data.get('name', 'Unknown Artist'),
-                        "cover": data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else '',
-                        "songs": songs
-                    }
+                    "result": data
                 }
             except Exception as e:
                 # Fallback menggunakan yt-dlp karena ytmusicapi sedang error untuk halaman artis (KeyError: 'contents')
@@ -147,18 +140,15 @@ def get_artist(id: str = Query(...)):
                         songs = []
                         for e in info.get('entries', []):
                             if not e or not e.get('id'): continue
-                            thumb = e.get('thumbnails', [{}])[-1].get('url', '') if e.get('thumbnails') else ''
                             songs.append({
                                 "videoId": e.get('id'),
                                 "title": e.get('title'),
                                 "artist": e.get('uploader') or info.get('uploader') or 'Unknown',
-                                "cover": thumb,
+                                "thumbnails": e.get('thumbnails', []),
                                 "url": "https://youtube.com/watch?v=" + str(e.get('id'))
                             })
                         
-                        cover_url = ""
-                        if info.get('thumbnails'):
-                            cover_url = info.get('thumbnails', [{}])[-1].get('url', '')
+                        thumbs = info.get('thumbnails', [])
                             
                         # Bersihkan nama artis dari string "Uploads from " dan " - Topic"
                         raw_name = info.get('uploader') or info.get('title', '') or 'Unknown Artist'
@@ -167,8 +157,10 @@ def get_artist(id: str = Query(...)):
                         return {
                             "status": True,
                             "result": {
+                                "artistId": id,
                                 "name": clean_name,
-                                "cover": cover_url,
+                                "thumbnails": thumbs,
+                                "topSongs": songs,
                                 "songs": songs
                             }
                         }
@@ -257,14 +249,30 @@ async def ytplay(request: Request):
     if not video_id:
         return {"status": False, "result": {}}
         
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False
+    }
+    audio_url = ""
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            audio_url = info.get('url', '')
+    except Exception as e:
+        pass
+        
     host_url = str(request.base_url).rstrip("/")
+    # Jika gagal mendapat direct URL, fallback ke stream lokal/proxy
+    final_audio = audio_url if audio_url else f"{host_url}/api/stream/{video_id}"
+    
     return {
         "status": True,
         "result": {
             "title": "Audio",
             "download": {
-                # Menggunakan backend proxy stream agar terhindar dari batasan IP yt-dlp dan IFrame yang buggy
-                "audio": f"{host_url}/api/stream/{video_id}"
+                "audio": final_audio
             }
         }
     }
