@@ -182,6 +182,9 @@ def get_lyrics(title: str = None, artist: str = None, q: str = None):
         pass
     return {"status": False, "result": None}
 
+import yt_dlp
+from fastapi.responses import StreamingResponse
+
 @app.get("/api/ytplay")
 @app.post("/api/ytplay")
 async def ytplay(request: Request):
@@ -199,7 +202,6 @@ async def ytplay(request: Request):
         video_id = video_id.split("&")[0]
         
     if not video_id:
-        # Mungkin dikirim videoId langsung
         if request.method == "POST":
             try:
                 data = await request.json()
@@ -208,16 +210,52 @@ async def ytplay(request: Request):
                 pass
         else:
             video_id = request.query_params.get("videoId") or ""
-            
+
+    if not video_id:
+        return {"status": False, "result": {}}
+        
+    host_url = str(request.base_url).rstrip("/")
     return {
         "status": True,
         "result": {
             "title": "Audio",
             "download": {
-                "audio": f"fake-yt-audio://{video_id}"
+                # Menggunakan backend proxy stream agar terhindar dari batasan IP yt-dlp dan IFrame yang buggy
+                "audio": f"{host_url}/api/stream/{video_id}"
             }
         }
     }
+
+@app.get("/api/stream/{video_id}")
+def stream_audio(video_id: str):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            audio_url = info.get('url')
+            
+            if not audio_url:
+                raise HTTPException(status_code=404, detail="Audio stream not found")
+                
+            def generate_audio():
+                with requests.get(audio_url, stream=True) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            yield chunk
+                            
+            return StreamingResponse(
+                generate_audio(), 
+                media_type="audio/mp4",
+                headers={"Accept-Ranges": "bytes"}
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8001))
