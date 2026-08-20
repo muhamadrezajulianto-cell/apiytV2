@@ -116,9 +116,9 @@ def ytplay(url: str = None, video_id: str = None):
         else:
             raise HTTPException(status_code=400, detail="Harap sediakan parameter url atau video_id")
             
-        api_url = f"https://star-cloud.web.id/api/ytplay?url={yt_url}"
+        api_url = "https://star-cloud.web.id/api/ytplay"
         
-        response = requests.get(api_url)
+        response = requests.post(api_url, json={"query": yt_url}, headers={"Content-Type": "application/json"})
         data = response.json()
         
         if data.get("status") and "result" in data and "download" in data["result"]:
