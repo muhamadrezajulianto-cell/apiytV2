@@ -106,8 +106,8 @@ def get_artist(id: str):
 
 @app.get("/api/ytplay")
 def ytplay(url: str = None, video_id: str = None):
-    import requests
     try:
+        import yt_dlp
         # Menghandle parameter url atau video_id
         if url:
             yt_url = url
@@ -116,18 +116,19 @@ def ytplay(url: str = None, video_id: str = None):
         else:
             raise HTTPException(status_code=400, detail="Harap sediakan parameter url atau video_id")
             
-        api_url = "https://star-cloud.web.id/api/ytplay"
-        
-        response = requests.post(api_url, json={"query": yt_url}, headers={"Content-Type": "application/json"})
-        data = response.json()
-        
-        if data.get("status") and "result" in data and "download" in data["result"]:
-            return format_response(
-                message="Sukses mengambil data media",
-                result=data["result"]
-            )
-        else:
-            return format_response(status="error", message="Format respons tidak sesuai ekspektasi.")
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'no_warnings': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(yt_url, download=False)
+            audio_url = info['url']
+            
+        return format_response(
+            message="Sukses mengambil data media",
+            result={"download": {"audio": audio_url}}
+        )
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal mengambil play data: {str(e)}")
