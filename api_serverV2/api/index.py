@@ -134,6 +134,12 @@ def get_artist(id: str = Query(...)):
     except Exception as e:
         return {"status": False, "result": {}}
 
+@app.get("/api/album/{browse_id}")
+def get_album_detail(browse_id: str):
+    # Endpoint ini persis sama dengan /api/artist untuk MPRE/VLPL
+    # Karena web player (album.js) langsung memanggil fetch('/api/album/...')
+    return get_artist(id=browse_id)
+
 @app.get("/api/suggest")
 def get_suggestions(q: str = None, query: str = None):
     actual_q = q or query
