@@ -249,37 +249,30 @@ async def ytplay(request: Request):
     if not video_id:
         return {"status": False, "result": {}}
         
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': False
-    }
-    
-    audio_url = ""
-    video_title = "audio"
+    # Ambil URL final langsung dari proxy API (star-cloud)
+    final_audio = ""
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            audio_url = info.get('url', '')
-            video_title = info.get('title', 'audio')
+        import urllib.request, json
+        
+        proxy_url = "https://star-cloud.web.id/api/ytplay"
+        body = json.dumps({"query": f"https://music.youtube.com/watch?v={video_id}"}).encode('utf-8')
+        
+        req = urllib.request.Request(proxy_url, data=body, headers={
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0'
+        })
+        
+        with urllib.request.urlopen(req, timeout=8) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            if res_data.get("status"):
+                final_audio = res_data.get("result", {}).get("download", {}).get("audio", "")
     except Exception as e:
         pass
         
     host_url = str(request.base_url).rstrip("/")
-    
-    import re
-    # Buat slug dari judul video untuk mematuhi format savetube (contoh: "di-akhir-perang")
-    slug = "-".join(re.findall(r'[a-z0-9]+', video_title.lower()))
-    if not slug:
-        slug = "audio"
+    if not final_audio:
+        final_audio = f"{host_url}/api/stream/{video_id}"
         
-    # URL CDN Savetube sesuai format user (berfungsi mem-bypass 403 Google IP Lock)
-    savetube_url = f"https://cdn403.savetube.vip/media/{video_id}/{slug}-128-ytshorts.savetube.me.mp3"
-    
-    # Gunakan savetube_url, jika gagal (di client), client bisa mencoba yt-dlp direct url
-    final_audio = savetube_url
-    
     return {
         "status": True,
         "result": {
