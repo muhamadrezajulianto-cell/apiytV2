@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 import uvicorn
@@ -71,7 +71,27 @@ def search(q: str = None, query: str = None):
 @app.get("/api/artist")
 def get_artist(id: str = Query(...)):
     try:
-        if id.startswith("MPRE") or id.startswith("VLPL"):
+        if id.startswith("MPRE"):
+            data = ytmusic.get_album(id)
+            songs = []
+            album_thumb = data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else ''
+            for tr in data.get('tracks', []):
+                songs.append({
+                    "videoId": tr.get('videoId'),
+                    "title": tr.get('title'),
+                    "artist": ", ".join([a.get('name', '') for a in tr.get('artists', [])]) if tr.get('artists') else 'Unknown',
+                    "cover": album_thumb,
+                    "url": "https://youtube.com/watch?v=" + str(tr.get('videoId'))
+                })
+            return {
+                "status": True, 
+                "result": {
+                    "name": data.get('title', 'Unknown Album'),
+                    "cover": album_thumb,
+                    "songs": songs
+                }
+            }
+        elif id.startswith("VLPL"):
             data = ytmusic.get_playlist(id)
             songs = []
             for tr in data.get('tracks', []):
@@ -157,11 +177,32 @@ def get_lyrics(title: str = None, artist: str = None, q: str = None):
     return {"status": False, "result": None}
 
 @app.get("/api/ytplay")
-def ytplay(url: str = None):
-    # Kembalikan fake-yt-audio agar web-player menggunakan IFrame Bridge
+@app.post("/api/ytplay")
+async def ytplay(request: Request):
+    if request.method == "POST":
+        try:
+            data = await request.json()
+            url = data.get("query") or data.get("url") or ""
+        except:
+            url = ""
+    else:
+        url = request.query_params.get("url") or request.query_params.get("query") or ""
+        
     video_id = url.split("v=")[-1] if url and "v=" in url else ""
     if "&" in video_id:
         video_id = video_id.split("&")[0]
+        
+    if not video_id:
+        # Mungkin dikirim videoId langsung
+        if request.method == "POST":
+            try:
+                data = await request.json()
+                video_id = data.get("videoId") or ""
+            except:
+                pass
+        else:
+            video_id = request.query_params.get("videoId") or ""
+            
     return {
         "status": True,
         "result": {
