@@ -129,7 +129,8 @@ def get_artist(id: str = Query(...)):
                     "result": {
                         "name": data.get('name', 'Unknown Artist'),
                         "cover": data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else '',
-                        "songs": songs
+                        "songs": songs,
+                        "topSongs": songs
                     }
                 }
             except Exception as e:
@@ -269,8 +270,10 @@ async def ytplay(request: Request):
         }
     }
 
+from fastapi import Request
+
 @app.get("/api/stream/{video_id}")
-def stream_audio(video_id: str):
+def stream_audio(video_id: str, request: Request):
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
@@ -285,17 +288,28 @@ def stream_audio(video_id: str):
             if not audio_url:
                 raise HTTPException(status_code=404, detail="Audio stream not found")
                 
+            req_headers = {}
+            range_header = request.headers.get("range")
+            if range_header:
+                req_headers["Range"] = range_header
+                
+            r = requests.get(audio_url, headers=req_headers, stream=True)
+            
             def generate_audio():
-                with requests.get(audio_url, stream=True) as r:
-                    r.raise_for_status()
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            yield chunk
-                            
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        yield chunk
+                        
+            resp_headers = {}
+            for h in ["Content-Range", "Content-Length", "Accept-Ranges", "Content-Type"]:
+                if h in r.headers:
+                    resp_headers[h] = r.headers[h]
+                    
             return StreamingResponse(
                 generate_audio(), 
-                media_type="audio/mp4",
-                headers={"Accept-Ranges": "bytes"}
+                status_code=r.status_code,
+                headers=resp_headers,
+                media_type=r.headers.get("Content-Type", "audio/mp4")
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
