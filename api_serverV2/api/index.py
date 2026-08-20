@@ -112,25 +112,68 @@ def get_artist(id: str = Query(...)):
                 }
             }
         else:
-            data = ytmusic.get_artist(id)
-            songs = []
-            for tr in data.get('songs', {}).get('results', []):
-                thumb = tr.get('thumbnails', [{}])[-1].get('url', '')
-                songs.append({
-                    "videoId": tr.get('videoId'),
-                    "title": tr.get('title'),
-                    "artist": ", ".join([a.get('name', '') for a in tr.get('artists', [])]) if tr.get('artists') else 'Unknown',
-                    "cover": thumb,
-                    "url": "https://youtube.com/watch?v=" + str(tr.get('videoId'))
-                })
-            return {
-                "status": True,
-                "result": {
-                    "name": data.get('name', 'Unknown Artist'),
-                    "cover": data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else '',
-                    "songs": songs
+            try:
+                data = ytmusic.get_artist(id)
+                songs = []
+                for tr in data.get('songs', {}).get('results', []):
+                    thumb = tr.get('thumbnails', [{}])[-1].get('url', '')
+                    songs.append({
+                        "videoId": tr.get('videoId'),
+                        "title": tr.get('title'),
+                        "artist": ", ".join([a.get('name', '') for a in tr.get('artists', [])]) if tr.get('artists') else 'Unknown',
+                        "cover": thumb,
+                        "url": "https://youtube.com/watch?v=" + str(tr.get('videoId'))
+                    })
+                return {
+                    "status": True,
+                    "result": {
+                        "name": data.get('name', 'Unknown Artist'),
+                        "cover": data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else '',
+                        "songs": songs
+                    }
                 }
-            }
+            except Exception as e:
+                # Fallback menggunakan yt-dlp karena ytmusicapi sedang error untuk halaman artis (KeyError: 'contents')
+                try:
+                    import yt_dlp
+                    ydl_opts = {
+                        'extract_flat': True,
+                        'quiet': True,
+                        'no_warnings': True,
+                        'playlist_end': 15
+                    }
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(f"https://www.youtube.com/channel/{id}", download=False)
+                        songs = []
+                        for e in info.get('entries', []):
+                            if not e or not e.get('id'): continue
+                            thumb = e.get('thumbnails', [{}])[-1].get('url', '') if e.get('thumbnails') else ''
+                            songs.append({
+                                "videoId": e.get('id'),
+                                "title": e.get('title'),
+                                "artist": e.get('uploader') or info.get('uploader') or 'Unknown',
+                                "cover": thumb,
+                                "url": "https://youtube.com/watch?v=" + str(e.get('id'))
+                            })
+                        
+                        cover_url = ""
+                        if info.get('thumbnails'):
+                            cover_url = info.get('thumbnails', [{}])[-1].get('url', '')
+                            
+                        # Bersihkan nama artis dari string "Uploads from " dan " - Topic"
+                        raw_name = info.get('uploader') or info.get('title', '') or 'Unknown Artist'
+                        clean_name = raw_name.replace('Uploads from ', '').replace(' - Topic', '')
+                            
+                        return {
+                            "status": True,
+                            "result": {
+                                "name": clean_name,
+                                "cover": cover_url,
+                                "songs": songs
+                            }
+                        }
+                except Exception as ex:
+                    return {"status": False, "result": {}}
     except Exception as e:
         return {"status": False, "result": {}}
 
