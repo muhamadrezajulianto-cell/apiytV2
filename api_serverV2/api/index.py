@@ -3,14 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 import uvicorn
 import os
+import re
+import requests
+import urllib.parse
 
 app = FastAPI(
-    title="YouTube Music REST API V2 by Zett",
+    title="YouTube Music REST API V2",
     description="API gratis dan cepat untuk mengambil data dari YouTube Music dan serve frontend StarMusify.",
     version="2.0.0"
 )
 
-# Konfigurasi CORS agar API bisa diakses dari frontend mana saja
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -21,130 +23,148 @@ app.add_middleware(
 
 ytmusic = YTMusic()
 
-def format_response(status="success", data=None, **kwargs):
-    response = {
-        "status": status,
-        "creator": "by zett"
-    }
-    if data is not None:
-        response["data"] = data
-    response.update(kwargs)
-    return response
-
 @app.get("/")
 @app.get("/api")
 def root_api():
-    return format_response(
-        message="Welcome to YouTube Music REST API V2 by Zett. Visit /docs for documentation.",
-        documentation="/docs"
-    )
+    return {"status": True, "message": "API V2 Running"}
 
 @app.get("/api/search")
-def search(q: str = Query(..., description="Kata kunci pencarian"), type: str = Query("songs", description="Tipe pencarian (songs/albums)")):
+def search(q: str = Query(...)):
     try:
-        results = ytmusic.search(q, filter=type, limit=10)
-        return format_response(data=results)
+        res = ytmusic.search(q, limit=20)
+        songs, playlists, artists = [], [], []
+        for s in res:
+            rt = s.get('resultType')
+            thumb = s.get('thumbnails', [{}])[-1].get('url', '')
+            if rt in ('song', 'video'):
+                songs.append({
+                    "videoId": s.get('videoId'),
+                    "title": s.get('title'),
+                    "artist": ", ".join([a.get('name', '') for a in s.get('artists', [])]),
+                    "artistId": s.get('artists', [{}])[0].get('id', '') if s.get('artists') else '',
+                    "cover": thumb,
+                    "url": "https://youtube.com/watch?v=" + str(s.get('videoId', ''))
+                })
+            elif rt == 'playlist':
+                bid = s.get('browseId') or s.get('playlistId')
+                playlists.append({
+                    "id": bid,
+                    "title": s.get('title'),
+                    "cover": thumb,
+                    "url": "https://youtube.com/playlist?list=" + str(bid)
+                })
+            elif rt == 'artist':
+                bid = s.get('browseId')
+                artists.append({
+                    "id": bid,
+                    "name": s.get('artist'),
+                    "cover": thumb,
+                    "url": "https://music.youtube.com/channel/" + str(bid)
+                })
+        return {"status": True, "result": {"songs": songs, "playlists": playlists, "artists": artists}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/song/{video_id}")
-def get_song_detail(video_id: str):
-    try:
-        details = ytmusic.get_song(video_id)
-        return format_response(data=details)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/lyrics/{video_id}")
-def get_lyrics(video_id: str, title: str = None, artist: str = None):
-    try:
-        watch_playlist = ytmusic.get_watch_playlist(videoId=video_id)
-        lyrics_id = watch_playlist.get('lyrics')
-        if lyrics_id:
-            lyrics_data = ytmusic.get_lyrics(lyrics_id)
-            return format_response(video_id=video_id, lyrics=lyrics_data.get('lyrics', ''))
-    except Exception:
-        pass # Lanjut ke fallback
-        
-    if title:
-        try:
-            import requests
-            import urllib.parse
-            q = urllib.parse.quote(f"{title} {artist or ''}")
-            res = requests.get(f"https://lrclib.net/api/search?q={q}", timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                if data and len(data) > 0:
-                    lyrics = data[0].get('syncedLyrics') or data[0].get('plainLyrics')
-                    if lyrics:
-                        return format_response(video_id=video_id, lyrics=lyrics)
-        except Exception:
-            pass
-            
-    return format_response(status="not_found", message="Lirik tidak tersedia.")
-
-@app.get("/api/album/{browse_id}")
-def get_album_detail(browse_id: str):
-    try:
-        if browse_id.startswith("MPRE"):
-            data = ytmusic.get_album(browse_id)
-        else:
-            data = ytmusic.get_playlist(browse_id)
-            
-        return format_response(data=data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/play/{video_id}")
-def play_audio(video_id: str):
-    return format_response(
-        message="URL Streaming Web",
-        url=f"https://music.youtube.com/watch?v={video_id}"
-    )
-
-@app.get("/api/suggest")
-def get_suggestions(q: str):
-    try:
-        suggestions = ytmusic.get_search_suggestions(q)
-        return format_response(data=suggestions)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": False, "result": {"songs": [], "playlists": [], "artists": []}}
 
 @app.get("/api/artist")
-def get_artist(id: str):
+def get_artist(id: str = Query(...)):
     try:
-        artist_data = ytmusic.get_artist(id)
-        return format_response(data=artist_data)
+        if id.startswith("MPRE") or id.startswith("VLPL"):
+            data = ytmusic.get_playlist(id)
+            songs = []
+            for tr in data.get('tracks', []):
+                thumb = tr.get('thumbnails', [{}])[-1].get('url', '')
+                songs.append({
+                    "videoId": tr.get('videoId'),
+                    "title": tr.get('title'),
+                    "artist": ", ".join([a.get('name', '') for a in tr.get('artists', [])]) if tr.get('artists') else 'Unknown',
+                    "cover": thumb,
+                    "url": "https://youtube.com/watch?v=" + str(tr.get('videoId'))
+                })
+            return {
+                "status": True, 
+                "result": {
+                    "name": data.get('title', 'Unknown Playlist'),
+                    "cover": data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else '',
+                    "songs": songs
+                }
+            }
+        else:
+            data = ytmusic.get_artist(id)
+            songs = []
+            for tr in data.get('songs', {}).get('results', []):
+                thumb = tr.get('thumbnails', [{}])[-1].get('url', '')
+                songs.append({
+                    "videoId": tr.get('videoId'),
+                    "title": tr.get('title'),
+                    "artist": ", ".join([a.get('name', '') for a in tr.get('artists', [])]) if tr.get('artists') else 'Unknown',
+                    "cover": thumb,
+                    "url": "https://youtube.com/watch?v=" + str(tr.get('videoId'))
+                })
+            return {
+                "status": True,
+                "result": {
+                    "name": data.get('name', 'Unknown Artist'),
+                    "cover": data.get('thumbnails', [{}])[-1].get('url', '') if data.get('thumbnails') else '',
+                    "songs": songs
+                }
+            }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": False, "result": {}}
+
+@app.get("/api/suggest")
+def get_suggestions(q: str = Query(...)):
+    try:
+        suggestions = ytmusic.get_search_suggestions(q)
+        return {"status": True, "result": suggestions}
+    except Exception as e:
+        return {"status": False, "result": []}
+
+@app.get("/api/lyrics")
+def get_lyrics(title: str = None, artist: str = None, q: str = None):
+    query = q or f"{title} {artist or ''}"
+    q_enc = urllib.parse.quote(query)
+    try:
+        res = requests.get(f"https://lrclib.net/api/search?q={q_enc}", timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            if data and len(data) > 0:
+                lyrics = data[0].get('syncedLyrics') or data[0].get('plainLyrics')
+                if lyrics:
+                    lines = []
+                    l_type = 'text'
+                    time_regex = re.compile(r'\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]')
+                    for rl in lyrics.split('\n'):
+                        m = time_regex.search(rl)
+                        if m:
+                            l_type = 'synced'
+                            time_sec = int(m.group(1)) * 60 + int(m.group(2)) + float("0." + (m.group(3) or "0"))
+                            text = time_regex.sub('', rl).strip()
+                            if text:
+                                lines.append({"text": text, "time": time_sec})
+                        elif rl.strip():
+                            lines.append({"text": rl.strip(), "time": 0})
+                    if not lines:
+                        lines = [{"text": lyrics, "time": 0}]
+                    return {"status": True, "result": {"lyrics": {"type": l_type, "lines": lines}}}
+    except Exception:
+        pass
+    return {"status": False, "result": None}
 
 @app.get("/api/ytplay")
-def ytplay(url: str = None, video_id: str = None):
-    try:
-        import yt_dlp
-        if url:
-            yt_url = url
-        elif video_id:
-            yt_url = f"https://music.youtube.com/watch?v={video_id}"
-        else:
-            raise HTTPException(status_code=400, detail="Harap sediakan parameter url atau video_id")
-            
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
+def ytplay(url: str = None):
+    # Kembalikan fake-yt-audio agar web-player menggunakan IFrame Bridge
+    video_id = url.split("v=")[-1] if url and "v=" in url else ""
+    if "&" in video_id:
+        video_id = video_id.split("&")[0]
+    return {
+        "status": True,
+        "result": {
+            "title": "Audio",
+            "download": {
+                "audio": f"fake-yt-audio://{video_id}"
+            }
         }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(yt_url, download=False)
-            audio_url = info['url']
-            
-        return format_response(
-            message="Sukses mengambil data media mandiri",
-            result={"download": {"audio": audio_url}}
-        )
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal mengekstrak audio: {str(e)}")
+    }
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8001))
