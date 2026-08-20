@@ -249,29 +249,24 @@ async def ytplay(request: Request):
     if not video_id:
         return {"status": False, "result": {}}
         
-    # Ambil URL final langsung dari proxy API (star-cloud)
-    final_audio = ""
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False
+    }
+    
+    audio_url = ""
     try:
-        import urllib.request, json
-        
-        proxy_url = "https://star-cloud.web.id/api/ytplay"
-        body = json.dumps({"query": f"https://music.youtube.com/watch?v={video_id}"}).encode('utf-8')
-        
-        req = urllib.request.Request(proxy_url, data=body, headers={
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0'
-        })
-        
-        with urllib.request.urlopen(req, timeout=8) as response:
-            res_data = json.loads(response.read().decode('utf-8'))
-            if res_data.get("status"):
-                final_audio = res_data.get("result", {}).get("download", {}).get("audio", "")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            audio_url = info.get('url', '')
     except Exception as e:
         pass
         
     host_url = str(request.base_url).rstrip("/")
-    if not final_audio:
-        final_audio = f"{host_url}/api/stream/{video_id}"
+    # Jika gagal mendapat direct URL, fallback ke stream lokal/proxy
+    final_audio = audio_url if audio_url else f"{host_url}/api/stream/{video_id}"
         
     return {
         "status": True,
