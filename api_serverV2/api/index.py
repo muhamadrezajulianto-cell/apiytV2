@@ -56,18 +56,32 @@ def get_song_detail(video_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/lyrics/{video_id}")
-def get_lyrics(video_id: str):
+def get_lyrics(video_id: str, title: str = None, artist: str = None):
     try:
         watch_playlist = ytmusic.get_watch_playlist(videoId=video_id)
         lyrics_id = watch_playlist.get('lyrics')
-        
         if lyrics_id:
             lyrics_data = ytmusic.get_lyrics(lyrics_id)
             return format_response(video_id=video_id, lyrics=lyrics_data.get('lyrics', ''))
-        else:
-            return format_response(status="not_found", message="Lirik tidak tersedia.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        pass # Lanjut ke fallback
+        
+    if title:
+        try:
+            import requests
+            import urllib.parse
+            q = urllib.parse.quote(f"{title} {artist or ''}")
+            res = requests.get(f"https://lrclib.net/api/search?q={q}", timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                if data and len(data) > 0:
+                    lyrics = data[0].get('syncedLyrics') or data[0].get('plainLyrics')
+                    if lyrics:
+                        return format_response(video_id=video_id, lyrics=lyrics)
+        except Exception:
+            pass
+            
+    return format_response(status="not_found", message="Lirik tidak tersedia.")
 
 @app.get("/api/album/{browse_id}")
 def get_album_detail(browse_id: str):
@@ -108,7 +122,6 @@ def get_artist(id: str):
 def ytplay(url: str = None, video_id: str = None):
     try:
         import yt_dlp
-        # Menghandle parameter url atau video_id
         if url:
             yt_url = url
         elif video_id:
@@ -131,7 +144,7 @@ def ytplay(url: str = None, video_id: str = None):
         )
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal mengambil play data: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Gagal mengekstrak audio: {str(e)}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8001))
