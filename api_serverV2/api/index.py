@@ -92,7 +92,8 @@ def get_artist(id: str = Query(...)):
                 }
             }
         elif id.startswith("VLPL"):
-            data = ytmusic.get_playlist(id)
+            playlist_id = id[2:]
+            data = ytmusic.get_playlist(playlist_id)
             songs = []
             for tr in data.get('tracks', []):
                 thumb = tr.get('thumbnails', [{}])[-1].get('url', '')
@@ -274,43 +275,63 @@ from fastapi import Request
 
 @app.get("/api/stream/{video_id}")
 def stream_audio(video_id: str, request: Request):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': False
-    }
+    audio_url = None
+    
+    # Coba pytubefix lebih dulu karena sering lebih ampuh menembus bot-protection Vercel
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            audio_url = info.get('url')
-            
-            if not audio_url:
-                raise HTTPException(status_code=404, detail="Audio stream not found")
+        from pytubefix import YouTube
+        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
+        stream = yt.streams.get_audio_only()
+        if stream:
+            audio_url = stream.url
+    except Exception as e:
+        pass
+
+    # Fallback ke yt-dlp jika pytubefix gagal
+    if not audio_url:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                audio_url = info.get('url')
+        except Exception as e:
+            if "Sign in to confirm" in str(e) or "bot" in str(e).lower():
+                pass # Lanjut raise error di bawah
+            else:
+                pass
                 
-            req_headers = {}
-            range_header = request.headers.get("range")
-            if range_header:
-                req_headers["Range"] = range_header
-                
-            r = requests.get(audio_url, headers=req_headers, stream=True)
+    if not audio_url:
+        raise HTTPException(status_code=404, detail="Audio stream not found atau terblokir proteksi YouTube.")
+        
+    try:
+        req_headers = {}
+        range_header = request.headers.get("range")
+        if range_header:
+            req_headers["Range"] = range_header
             
-            def generate_audio():
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        yield chunk
-                        
-            resp_headers = {}
-            for h in ["Content-Range", "Content-Length", "Accept-Ranges", "Content-Type"]:
-                if h in r.headers:
-                    resp_headers[h] = r.headers[h]
+        r = requests.get(audio_url, headers=req_headers, stream=True)
+            
+        def generate_audio():
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
                     
-            return StreamingResponse(
-                generate_audio(), 
-                status_code=r.status_code,
-                headers=resp_headers,
-                media_type=r.headers.get("Content-Type", "audio/mp4")
-            )
+        resp_headers = {}
+        for h in ["Content-Range", "Content-Length", "Accept-Ranges", "Content-Type"]:
+            if h in r.headers:
+                resp_headers[h] = r.headers[h]
+                
+        return StreamingResponse(
+            generate_audio(), 
+            status_code=r.status_code,
+            headers=resp_headers,
+            media_type=r.headers.get("Content-Type", "audio/mp4")
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
