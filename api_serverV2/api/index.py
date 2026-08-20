@@ -29,9 +29,12 @@ def root_api():
     return {"status": True, "message": "API V2 Running"}
 
 @app.get("/api/search")
-def search(q: str = Query(...)):
+def search(q: str = None, query: str = None):
+    actual_q = q or query
+    if not actual_q:
+        return {"status": False, "result": {"songs": [], "playlists": [], "artists": []}}
     try:
-        res = ytmusic.search(q, limit=20)
+        res = ytmusic.search(actual_q, limit=20)
         songs, playlists, artists = [], [], []
         for s in res:
             rt = s.get('resultType')
@@ -59,7 +62,7 @@ def search(q: str = Query(...)):
                     "id": bid,
                     "name": s.get('artist'),
                     "cover": thumb,
-                    "url": "https://music.youtube.com/channel/" + str(bid)
+                    "url": "https://youtube.com/channel/" + str(bid)
                 })
         return {"status": True, "result": {"songs": songs, "playlists": playlists, "artists": artists}}
     except Exception as e:
@@ -112,9 +115,12 @@ def get_artist(id: str = Query(...)):
         return {"status": False, "result": {}}
 
 @app.get("/api/suggest")
-def get_suggestions(q: str = Query(...)):
+def get_suggestions(q: str = None, query: str = None):
+    actual_q = q or query
+    if not actual_q:
+        return {"status": False, "result": []}
     try:
-        suggestions = ytmusic.get_search_suggestions(q)
+        suggestions = ytmusic.get_search_suggestions(actual_q)
         return {"status": True, "result": suggestions}
     except Exception as e:
         return {"status": False, "result": []}
